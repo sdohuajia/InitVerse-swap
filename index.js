@@ -43,7 +43,18 @@ async function swapExactETHForTokens() {
 
     for (let i = 0; i < TOTAL_TRANSACTIONS; i++) {
         try {
-            console.log(`\n执行第 ${i + 1}/${TOTAL_TRANSACTIONS} 次交易`);
+            // 添加当前时间显示
+            const currentTime = new Date().toLocaleString('zh-CN', { 
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false
+            });
+            console.log(`\n当前时间: ${currentTime}`);
+            console.log(`执行第 ${i + 1}/${TOTAL_TRANSACTIONS} 次交易`);
             
             const swapAmountWei = ethers.parseEther(SWAP_AMOUNT);
             const amountsOut = await contract.getAmountsOut(swapAmountWei, path);
