@@ -1,0 +1,15 @@
+{
+  "name": "eth-swap-example",
+  "version": "1.0.0",
+  "description": "A script to swap ETH for tokens using Uniswap",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "ethers": "^6.0.0",
+    "readline": "^1.3.0"
+  },
+  "author": "",
+  "license": "MIT"
+}
