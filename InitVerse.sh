@@ -68,7 +68,7 @@ function run_initverse_interactive() {
 
     # 获取用户输入的私钥和钱包地址
     echo "请输入您的私钥："
-    read -s PRIVATE_KEY  # 使用 -s 参数让输入隐藏
+    read PRIVATE_KEY  
 
     echo "请输入您的钱包地址："
     read WALLET_ADDRESS
@@ -79,11 +79,11 @@ function run_initverse_interactive() {
         return 1
     fi
 
-    # 创建或写入到 token 文件
-    TOKEN_FILE="token"
+    # 创建或写入到 token.txt 文件
+    TOKEN_FILE="token.txt"
     echo "$PRIVATE_KEY,$WALLET_ADDRESS" > "$TOKEN_FILE"
 
-    echo "私钥和钱包地址已成功写入到 token 文件。"
+    echo "私钥和钱包地址已成功写入到 token.txt 文件。"
 
     # 使用 screen 启动 npm start，后台运行项目
     echo "正在启动项目（后台运行）..."
