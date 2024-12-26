@@ -94,6 +94,10 @@ function run_initverse_interactive() {
     echo "  screen -r Initverse"
     echo "若要分离当前的 screen 会话，按下 Ctrl + A + D"
     echo "若要关闭后台运行的项目，请使用 'screen -S Initverse -X quit' 命令退出 screen 会话。"
+
+    # 提示用户按任意键返回主菜单
+    read -n 1 -s -r -p "按任意键返回主菜单..."
+    main_menu
 }
 
 # 启动主菜单
