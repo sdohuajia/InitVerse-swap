@@ -7,8 +7,11 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "ethers": "^6.0.0",
-    "readline": "^1.3.0"
+    "ethers": "^6.13.4",
+    "readline": "^1.3.0",
+    "axios": "^1.4.0",
+    "https-proxy-agent": "^5.0.0",
+    "socks-proxy-agent": "^5.0.0"
   },
   "author": "",
   "license": "MIT"
