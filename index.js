@@ -78,6 +78,42 @@ function createProvider(proxy) {
     return provider;
 }
 
+// 颜色输出函数
+const colorize = {
+    green: (text) => `\x1b[32m${text}\x1b[0m`, // 绿色
+    red: (text) => `\x1b[31m${text}\x1b[0m`,   // 红色
+    yellow: (text) => `\x1b[33m${text}\x1b[0m`, // 黄色
+    blue: (text) => `\x1b[34m${text}\x1b[0m`,   // 蓝色
+    cyan: (text) => `\x1b[36m${text}\x1b[0m`,   // 青色
+    magenta: (text) => `\x1b[35m${text}\x1b[0m`, // 品红色
+    white: (text) => `\x1b[37m${text}\x1b[0m`,   // 白色
+};
+
+// 打印信息
+function logInfo(message) {
+    console.log(colorize.blue(message));
+}
+
+// 打印成功信息
+function logSuccess(message) {
+    console.log(colorize.green(message));
+}
+
+// 打印错误信息
+function logError(message) {
+    console.log(colorize.red(message));
+}
+
+// 打印警告信息
+function logWarning(message) {
+    console.log(colorize.yellow(message));
+}
+
+// 打印交易哈希信息
+function logTxHash(message) {
+    console.log(colorize.cyan(message)); // 使用青色输出交易哈希
+}
+
 async function swapExactETHForTokens() {
     const wallets = getWallets(); // 获取多个钱包
     const proxies = getProxies(); // 获取代理列表
@@ -108,8 +144,8 @@ async function swapExactETHForTokens() {
                 second: '2-digit',
                 hour12: false
             });
-            console.log(`\n当前时间: ${currentTime}`);
-            console.log(`执行第 ${i + 1}/${TOTAL_TRANSACTIONS} 次交易`);
+            logInfo(`\n当前时间: ${currentTime}`);
+            logInfo(`执行第 ${i + 1}/${TOTAL_TRANSACTIONS} 次交易`);
 
             // 创建所有钱包的交易任务
             const transactionPromises = wallets.map((wallet, j) => {
@@ -118,12 +154,12 @@ async function swapExactETHForTokens() {
 
                 // 显示使用的代理或直连模式
                 if (proxy) {
-                    console.log(`正在使用的代理: ${proxy}`);
+                    logInfo(`正在使用的代理: ${colorize.magenta(proxy)}`);
                 } else {
-                    console.log("使用直连模式");
+                    logInfo("使用直连模式");
                 }
 
-                console.log(`正在使用的钱包地址: ${wallet.walletAddress}`);
+                logInfo(`正在使用的钱包地址: ${colorize.white(wallet.walletAddress)}`);
                 
                 const provider = createProvider(proxy);
                 const walletInstance = new ethers.Wallet(wallet.privateKey, provider);
@@ -144,12 +180,12 @@ async function swapExactETHForTokens() {
                         }
                     );
                 }).then(tx => {
-                    console.log(`交易已发送：${tx.hash}`);
+                    logTxHash(`交易已发送：${tx.hash}`);
                     return tx.wait(); // 等待交易确认
                 }).then(() => {
-                    console.log("交易已确认");
+                    logSuccess("交易已确认");
                 }).catch(error => {
-                    console.error(`钱包地址 ${wallet.walletAddress} 交易失败:`, error);
+                    logError(`钱包地址 ${wallet.walletAddress} 交易失败: ${error.message}`);
                 });
             });
 
@@ -158,11 +194,11 @@ async function swapExactETHForTokens() {
 
             // 如果不是最后一次交易，等待 DELAY_MINUTES 分钟
             if (i < TOTAL_TRANSACTIONS - 1) {
-                console.log(`等待 ${DELAY_MINUTES} 分钟后继续下一次交易...\n`);
+                logWarning(`等待 ${DELAY_MINUTES} 分钟后继续下一次交易...\n`);
                 await countdown(DELAY_MINUTES); // 使用倒计时显示
             }
         } catch (error) {
-            console.error(`第 ${i + 1} 次交易失败:`, error);
+            logError(`第 ${i + 1} 次交易失败: ${error.message}`);
             await sleep(1); // 错误后暂停1分钟
         }
     }
@@ -170,10 +206,10 @@ async function swapExactETHForTokens() {
 
 swapExactETHForTokens()
     .then(() => {
-        console.log("\n所有交易已完成");
+        logSuccess("\n所有交易已完成");
         process.exit(0);
     })
     .catch(error => {
-        console.error("脚本执行错误:", error);
+        logError("脚本执行错误:", error);
         process.exit(1);
     });
