@@ -7,7 +7,7 @@ const SocksProxyAgent = require('socks-proxy-agent');
 // 颜色输出函数
 const colorize = {
     green: (text) => `\x1b[32m${text}\x1b[0m`,
-    red: (text) => `\x1b[31m${text}\x1b[0m`, 
+    red: (text) => `\x1b[31m${text}\x1b[0m`,
     yellow: (text) => `\x1b[33m${text}\x1b[0m`,
     blue: (text) => `\x1b[34m${text}\x1b[0m`,
     cyan: (text) => `\x1b[36m${text}\x1b[0m`,
@@ -124,12 +124,12 @@ async function processSingleWallet(wallet, proxy, index, routerAddress, path, sw
     try {
         const provider = createProvider(proxy);
         const signer = new ethers.Wallet(wallet.privateKey, provider);
-        
+
         const abi = [
             "function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable",
             "function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)"
         ];
-        
+
         const contract = new ethers.Contract(routerAddress, abi, signer);
 
         logger.info(`钱包 ${index + 1}: ${wallet.walletAddress}`);
@@ -216,7 +216,8 @@ async function main() {
 
         // 并发处理所有钱包的交易
         const transactions = wallets.map((wallet, index) => {
-            const proxy = proxies.length > 0 ? proxies[index % proxies.length] : null;
+            // 获取对应的代理（如果没有代理，使用 null 代表直连）
+            const proxy = proxies[index] || null;  // 如果没有代理，则使用 null 表示直连
             return processSingleWallet(wallet, proxy, index, routerAddress, path, SWAP_AMOUNT);
         });
 
@@ -226,21 +227,17 @@ async function main() {
         // 显示交易统计
         const successful = results.filter(r => r.success).length;
         const failed = results.filter(r => !r.success).length;
+        logger.info(`成功交易: ${successful}，失败交易: ${failed}`);
         
-        logger.info(`\n本轮交易统计:`);
-        logger.success(`成功: ${successful}`);
-        logger.error(`失败: ${failed}`);
-
-        // 如果不是最后一轮，等待下一轮
+        // 每轮结束后休息指定时间
         if (round < TOTAL_ROUNDS - 1) {
-            logger.warning(`\n等待 ${DELAY_MINUTES} 分钟后开始下一轮...\n`);
+            logger.info(`等待 ${DELAY_MINUTES} 分钟，进入下一轮`);
             await countdown(DELAY_MINUTES);
         }
     }
 }
 
-// 启动脚本
+// 执行主函数
 main().catch(error => {
-    logger.error('脚本执行失败:', error);
-    process.exit(1);
+    logger.error(`程序出错: ${error.message}`);
 });
