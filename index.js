@@ -21,7 +21,7 @@ const logger = {
     success: (message) => console.log(colorize.green(message)),
     error: (message) => console.log(colorize.red(message)),
     warning: (message) => console.log(colorize.yellow(message)),
-    tx: (message) => console.log(colorize.cyan(message))
+    tx: (message) => console.log(colorize.cyan(message)),
 };
 
 // 睡眠函数
@@ -217,7 +217,7 @@ async function main() {
         // 并发处理所有钱包的交易
         const transactions = wallets.map((wallet, index) => {
             // 获取对应的代理（如果没有代理，使用 null 代表直连）
-            const proxy = proxies[index] || null;  // 如果没有代理，则使用 null 表示直连
+            const proxy = proxies[index] || null;
             return processSingleWallet(wallet, proxy, index, routerAddress, path, SWAP_AMOUNT);
         });
 
