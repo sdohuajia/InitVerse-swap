@@ -178,6 +178,25 @@ async function processSingleWallet(wallet, proxy, index, routerAddress, path, sw
     }
 }
 
+// 计算距离下一个零点的时间间隔
+function getTimeUntilMidnight() {
+    const now = new Date();
+    const nextMidnight = new Date(now);
+    nextMidnight.setHours(24, 0, 0, 0); // 设置为第二天零点
+    return nextMidnight.getTime() - now.getTime();
+}
+
+// 每天零点重置
+function resetAtMidnight() {
+    const timeUntilMidnight = getTimeUntilMidnight();
+    setTimeout(() => {
+        logger.info("到了零点，开始重置...");
+        // 这里你可以进行重置操作，例如重新开始交易等
+        main();  // 重新执行主函数或其他重置操作
+        resetAtMidnight();  // 继续在未来的零点时刻执行此操作
+    }, timeUntilMidnight);
+}
+
 // 主函数
 async function main() {
     const wallets = getWallets();
@@ -237,7 +256,8 @@ async function main() {
     }
 }
 
-// 执行主函数
+// 执行主函数并设置每天零点重置
 main().catch(error => {
     logger.error(`程序出错: ${error.message}`);
 });
+resetAtMidnight(); // 每天零点进行重置
