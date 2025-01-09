@@ -82,6 +82,19 @@ function getProxies() {
     }
 }
 
+// 添加重试函数
+async function withRetry(fn, maxAttempts = 3, delaySeconds = 5) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            if (attempt === maxAttempts) throw error;
+            logger.warning(`尝试第 ${attempt} 次失败，${delaySeconds} 秒后重试...`);
+            await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
+        }
+    }
+}
+
 // 创建Provider
 function createProvider(proxy) {
     const providerUrl = "https://rpc-testnet.inichain.com";
@@ -95,87 +108,89 @@ function createProvider(proxy) {
         }
     }
 
+    const provider = new ethers.JsonRpcProvider(providerUrl, undefined, {
+        timeout: 30000, // 增加超时时间到 30 秒
+    });
+
     if (agent) {
-        const provider = new ethers.JsonRpcProvider(providerUrl);
         provider.send = async (method, params) => {
-            try {
+            return await withRetry(async () => {
                 const response = await axios.post(providerUrl, {
                     jsonrpc: "2.0",
                     id: 1,
                     method,
                     params
                 }, {
-                    httpsAgent: agent
+                    httpsAgent: agent,
+                    timeout: 30000
                 });
                 return response.data.result;
-            } catch (error) {
-                logger.error(`代理请求失败: ${error.message}`);
-                throw error;
-            }
+            });
         };
-        return provider;
     }
 
-    return new ethers.JsonRpcProvider(providerUrl);
+    return provider;
 }
 
 // 处理单个钱包的交易
 async function processSingleWallet(wallet, proxy, index, routerAddress, path, swapAmount) {
-    try {
-        const provider = createProvider(proxy);
-        const signer = new ethers.Wallet(wallet.privateKey, provider);
+    return await withRetry(async () => {
+        try {
+            const provider = createProvider(proxy);
+            const signer = new ethers.Wallet(wallet.privateKey, provider);
 
-        const abi = [
-            "function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable",
-            "function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)"
-        ];
+            const abi = [
+                "function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable",
+                "function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)"
+            ];
 
-        const contract = new ethers.Contract(routerAddress, abi, signer);
+            const contract = new ethers.Contract(routerAddress, abi, signer);
 
-        logger.info(`钱包 ${index + 1}: ${wallet.walletAddress}`);
-        logger.info(`代理状态: ${proxy ? colorize.magenta(proxy) : "直连模式"}`);
+            logger.info(`钱包 ${index + 1}: ${wallet.walletAddress}`);
+            logger.info(`代理状态: ${proxy ? colorize.magenta(proxy) : "直连模式"}`);
 
-        // 获取gas价格
-        const feeData = await provider.getFeeData();
-        const gasPrice = feeData.gasPrice;
+            // 获取gas价格
+            const feeData = await provider.getFeeData();
+            const gasPrice = feeData.gasPrice;
 
-        // 准备交易参数
-        const swapAmountWei = ethers.parseEther(swapAmount);
-        const deadline = Math.floor(Date.now() / 1000) + 60 * 20;
+            // 准备交易参数
+            const swapAmountWei = ethers.parseEther(swapAmount);
+            const deadline = Math.floor(Date.now() / 1000) + 60 * 20;
 
-        const txParams = {
-            value: swapAmountWei,
-            gasLimit: 300000n
-        };
+            const txParams = {
+                value: swapAmountWei,
+                gasLimit: 300000n
+            };
 
-        // 发送交易
-        const tx = await contract.swapExactETHForTokens(
-            0, // amountOutMin
-            path,
-            wallet.walletAddress,
-            deadline,
-            txParams
-        );
+            // 发送交易
+            const tx = await contract.swapExactETHForTokens(
+                0, // amountOutMin
+                path,
+                wallet.walletAddress,
+                deadline,
+                txParams
+            );
 
-        logger.tx(`钱包 ${index + 1} 交易哈希: ${tx.hash}`);
-        logger.info(`Gas Price: ${ethers.formatUnits(gasPrice, 'gwei')} Gwei`);
+            logger.tx(`钱包 ${index + 1} 交易哈希: ${tx.hash}`);
+            logger.info(`Gas Price: ${ethers.formatUnits(gasPrice, 'gwei')} Gwei`);
 
-        const receipt = await tx.wait();
-        logger.success(`钱包 ${index + 1} 交易成功 (Gas Used: ${receipt.gasUsed})`);
+            const receipt = await tx.wait();
+            logger.success(`钱包 ${index + 1} 交易成功 (Gas Used: ${receipt.gasUsed})`);
 
-        return {
-            success: true,
-            wallet: wallet.walletAddress,
-            hash: tx.hash
-        };
-    } catch (error) {
-        logger.error(`钱包 ${index + 1} 交易失败: ${error.message}`);
-        return {
-            success: false,
-            wallet: wallet.walletAddress,
-            error: error.message
-        };
-    }
+            return {
+                success: true,
+                wallet: wallet.walletAddress,
+                hash: tx.hash
+            };
+        } catch (error) {
+            logger.error(`钱包 ${index + 1} 交易失败: ${error.message}`);
+            return {
+                success: false,
+                wallet: wallet.walletAddress,
+                error: error.message
+            };
+        }
+    });
 }
 
 // 计算距离下一个零点的时间间隔
