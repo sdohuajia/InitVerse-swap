@@ -4,6 +4,31 @@ const axios = require('axios');
 const HttpsProxyAgent = require('https-proxy-agent');
 const SocksProxyAgent = require('socks-proxy-agent');
 
+// 合约地址和ABI
+const ROUTER_ADDRESS = "0x4ccB784744969D9B63C15cF07E622DDA65A88Ee7";
+const DAILY_CHECKIN_CONTRACT = "0x4ccB784744969D9B63C15cF07E622DDA65A88Ee7"; // 替换为实际的签到合约地址
+const ROUTER_ABI = [
+    "function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable",
+    "function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)"
+];
+const CHECKIN_ABI = ["function checkIn() external"];
+
+// Token路径配置
+const TOKEN_PATH = [
+    "0xfbecae21c91446f9c7b87e4e5869926998f99ffe",  // Token in
+    "0xcf259bca0315c6d32e877793b6a10e97e7647fde"   // Token out
+];
+
+// 交易配置
+const CONFIG = {
+    TOTAL_ROUNDS: 144,
+    DELAY_MINUTES: 11,
+    SWAP_AMOUNT: "0.0001",
+    MAX_RETRIES: 3,
+    RETRY_DELAY: 5,
+    GAS_LIMIT: 300000n
+};
+
 // 颜色输出函数
 const colorize = {
     green: (text) => `\x1b[32m${text}\x1b[0m`,
@@ -24,10 +49,9 @@ const logger = {
     tx: (message) => console.log(colorize.cyan(message)),
 };
 
-// 睡眠函数
+// 工具函数
 const sleep = (minutes) => new Promise(resolve => setTimeout(resolve, minutes * 60 * 1000));
 
-// 倒计时显示
 async function countdown(minutes) {
     const totalSeconds = minutes * 60;
     for (let i = totalSeconds; i > 0; i--) {
@@ -41,7 +65,7 @@ async function countdown(minutes) {
     console.log('\n');
 }
 
-// 读取钱包配置
+// 文件读取函数
 function getWallets() {
     try {
         const content = fs.readFileSync('token.txt', 'utf-8');
@@ -67,7 +91,6 @@ function getWallets() {
     }
 }
 
-// 读取代理配置
 function getProxies() {
     try {
         const proxies = fs.readFileSync('proxy.txt', 'utf-8')
@@ -82,20 +105,7 @@ function getProxies() {
     }
 }
 
-// 添加重试函数
-async function withRetry(fn, maxAttempts = 3, delaySeconds = 5) {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-            return await fn();
-        } catch (error) {
-            if (attempt === maxAttempts) throw error;
-            logger.warning(`尝试第 ${attempt} 次失败，${delaySeconds} 秒后重试...`);
-            await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
-        }
-    }
-}
-
-// 创建Provider
+// Provider创建函数
 function createProvider(proxy) {
     const providerUrl = "https://rpc-testnet.inichain.com";
     let agent;
@@ -109,7 +119,7 @@ function createProvider(proxy) {
     }
 
     const provider = new ethers.JsonRpcProvider(providerUrl, undefined, {
-        timeout: 30000, // 增加超时时间到 30 秒
+        timeout: 30000,
     });
 
     if (agent) {
@@ -132,40 +142,75 @@ function createProvider(proxy) {
     return provider;
 }
 
-// 处理单个钱包的交易
-async function processSingleWallet(wallet, proxy, index, routerAddress, path, swapAmount) {
+// 重试函数
+async function withRetry(fn, maxAttempts = CONFIG.MAX_RETRIES, delaySeconds = CONFIG.RETRY_DELAY) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            if (attempt === maxAttempts) throw error;
+            logger.warning(`尝试第 ${attempt} 次失败，${delaySeconds} 秒后重试...`);
+            await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
+        }
+    }
+}
+
+// 签到功能
+async function performDailyCheckin(wallet, proxy, index) {
     return await withRetry(async () => {
         try {
             const provider = createProvider(proxy);
             const signer = new ethers.Wallet(wallet.privateKey, provider);
+            const contract = new ethers.Contract(DAILY_CHECKIN_CONTRACT, CHECKIN_ABI, signer);
 
-            const abi = [
-                "function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable",
-                "function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)"
-            ];
+            logger.info(`钱包 ${index + 1}: 开始每日签到`);
 
-            const contract = new ethers.Contract(routerAddress, abi, signer);
+            const feeData = await provider.getFeeData();
+            const gasPrice = feeData.gasPrice;
+
+            const txParams = {
+                gasLimit: CONFIG.GAS_LIMIT
+            };
+
+            const tx = await contract.checkIn(txParams);
+            logger.tx(`钱包 ${index + 1} 签到交易哈希: ${tx.hash}`);
+            
+            const receipt = await tx.wait();
+            logger.success(`钱包 ${index + 1} 签到成功 (Gas Used: ${receipt.gasUsed})`);
+
+            return { success: true, hash: tx.hash };
+        } catch (error) {
+            logger.error(`钱包 ${index + 1} 签到失败: ${error.message}`);
+            return { success: false, error: error.message };
+        }
+    });
+}
+
+// 交易功能
+async function processSingleWallet(wallet, proxy, index) {
+    return await withRetry(async () => {
+        try {
+            const provider = createProvider(proxy);
+            const signer = new ethers.Wallet(wallet.privateKey, provider);
+            const contract = new ethers.Contract(ROUTER_ADDRESS, ROUTER_ABI, signer);
 
             logger.info(`钱包 ${index + 1}: ${wallet.walletAddress}`);
             logger.info(`代理状态: ${proxy ? colorize.magenta(proxy) : "直连模式"}`);
 
-            // 获取gas价格
             const feeData = await provider.getFeeData();
             const gasPrice = feeData.gasPrice;
 
-            // 准备交易参数
-            const swapAmountWei = ethers.parseEther(swapAmount);
+            const swapAmountWei = ethers.parseEther(CONFIG.SWAP_AMOUNT);
             const deadline = Math.floor(Date.now() / 1000) + 60 * 20;
 
             const txParams = {
                 value: swapAmountWei,
-                gasLimit: 300000n
+                gasLimit: CONFIG.GAS_LIMIT
             };
 
-            // 发送交易
             const tx = await contract.swapExactETHForTokens(
-                0, // amountOutMin
-                path,
+                0,
+                TOKEN_PATH,
                 wallet.walletAddress,
                 deadline,
                 txParams
@@ -193,23 +238,40 @@ async function processSingleWallet(wallet, proxy, index, routerAddress, path, sw
     });
 }
 
-// 计算距离下一个零点的时间间隔
-function getTimeUntilMidnight() {
-    const now = new Date();
-    const nextMidnight = new Date(now);
-    nextMidnight.setHours(24, 0, 0, 0); // 设置为第二天零点
-    return nextMidnight.getTime() - now.getTime();
-}
-
-// 每天零点重置
-function resetAtMidnight() {
-    const timeUntilMidnight = getTimeUntilMidnight();
-    setTimeout(() => {
-        logger.info("到了零点，开始重置...");
-        // 这里你可以进行重置操作，例如重新开始交易等
-        main();  // 重新执行主函数或其他重置操作
-        resetAtMidnight();  // 继续在未来的零点时刻执行此操作
-    }, timeUntilMidnight);
+// 调度函数
+function scheduleCheckin(wallets, proxies) {
+    const scheduleNextCheckin = () => {
+        const now = new Date();
+        const nextCheckin = new Date();
+        nextCheckin.setHours(10, 0, 0, 0);
+        
+        if (now >= nextCheckin) {
+            nextCheckin.setDate(nextCheckin.getDate() + 1);
+        }
+        
+        const timeUntilCheckin = nextCheckin.getTime() - now.getTime();
+        
+        setTimeout(async () => {
+            logger.info("开始执行每日签到");
+            
+            const checkinResults = await Promise.all(
+                wallets.map((wallet, index) => {
+                    const proxy = proxies[index] || null;
+                    return performDailyCheckin(wallet, proxy, index);
+                })
+            );
+            
+            const successful = checkinResults.filter(r => r.success).length;
+            const failed = checkinResults.filter(r => !r.success).length;
+            logger.info(`签到完成 - 成功: ${successful}，失败: ${failed}`);
+            
+            scheduleNextCheckin();
+        }, timeUntilCheckin);
+        
+        logger.info(`下次签到时间: ${nextCheckin.toLocaleString()}`);
+    };
+    
+    scheduleNextCheckin();
 }
 
 // 主函数
@@ -222,19 +284,11 @@ async function main() {
         process.exit(1);
     }
 
-    // 配置参数
-    const TOTAL_ROUNDS = 144;  // 总轮数
-    const DELAY_MINUTES = 11;  // 轮次间隔
-    const SWAP_AMOUNT = "0.0001";  // 交易数量
-    
-    const routerAddress = "0x4ccB784744969D9B63C15cF07E622DDA65A88Ee7";
-    const path = [
-        "0xfbecae21c91446f9c7b87e4e5869926998f99ffe",  // Token in
-        "0xcf259bca0315c6d32e877793b6a10e97e7647fde"   // Token out
-    ];
+    // 启动签到调度
+    scheduleCheckin(wallets, proxies);
 
     // 开始循环交易
-    for (let round = 0; round < TOTAL_ROUNDS; round++) {
+    for (let round = 0; round < CONFIG.TOTAL_ROUNDS; round++) {
         const currentTime = new Date().toLocaleString('zh-CN', {
             year: 'numeric',
             month: '2-digit',
@@ -246,33 +300,27 @@ async function main() {
         });
 
         logger.info(`\n当前时间: ${currentTime}`);
-        logger.info(`执行第 ${round + 1}/${TOTAL_ROUNDS} 轮交易\n`);
+        logger.info(`执行第 ${round + 1}/${CONFIG.TOTAL_ROUNDS} 轮交易\n`);
 
-        // 并发处理所有钱包的交易
         const transactions = wallets.map((wallet, index) => {
-            // 获取对应的代理（如果没有代理，使用 null 代表直连）
             const proxy = proxies[index] || null;
-            return processSingleWallet(wallet, proxy, index, routerAddress, path, SWAP_AMOUNT);
+            return processSingleWallet(wallet, proxy, index);
         });
 
-        // 等待所有交易完成
         const results = await Promise.all(transactions);
 
-        // 显示交易统计
         const successful = results.filter(r => r.success).length;
         const failed = results.filter(r => !r.success).length;
         logger.info(`成功交易: ${successful}，失败交易: ${failed}`);
         
-        // 每轮结束后休息指定时间
-        if (round < TOTAL_ROUNDS - 1) {
-            logger.info(`等待 ${DELAY_MINUTES} 分钟，进入下一轮`);
-            await countdown(DELAY_MINUTES);
+        if (round < CONFIG.TOTAL_ROUNDS - 1) {
+            logger.info(`等待 ${CONFIG.DELAY_MINUTES} 分钟，进入下一轮`);
+            await countdown(CONFIG.DELAY_MINUTES);
         }
     }
 }
 
-// 执行主函数并设置每天零点重置
+// 启动程序
 main().catch(error => {
     logger.error(`程序出错: ${error.message}`);
 });
-resetAtMidnight(); // 每天零点进行重置
