@@ -4,30 +4,32 @@ const axios = require('axios');
 const HttpsProxyAgent = require('https-proxy-agent');
 const SocksProxyAgent = require('socks-proxy-agent');
 
-// 合约地址和ABI
-const ROUTER_ADDRESS = "0x4ccB784744969D9B63C15cF07E622DDA65A88Ee7";
-const DAILY_CHECKIN_CONTRACT = "0x4ccB784744969D9B63C15cF07E622DDA65A88Ee7"; // 替换为实际的签到合约地址
-const ROUTER_ABI = [
-    "function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable",
-    "function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)"
-];
-const CHECKIN_ABI = ["function checkIn() external"];
-
-// Token路径配置
-const TOKEN_PATH = [
-    "0xfbecae21c91446f9c7b87e4e5869926998f99ffe",  // Token in
-    "0xcf259bca0315c6d32e877793b6a10e97e7647fde"   // Token out
-];
-
-// 交易配置
+// 配置参数
 const CONFIG = {
     TOTAL_ROUNDS: 144,
     DELAY_MINUTES: 11,
     SWAP_AMOUNT: "0.0001",
-    MAX_RETRIES: 3,
-    RETRY_DELAY: 5,
-    GAS_LIMIT: 300000n
+    GAS_LIMIT: 300000n,
+    CHECKIN_TIME: 10, // 每日签到时间（24小时制）
 };
+
+// 合约地址和路径配置
+const ROUTER_ADDRESS = "0x4ccB784744969D9B63c15Cf07E622DDA65A88Ee7";
+const DAILY_CHECKIN_CONTRACT = "YOUR_CHECKIN_CONTRACT_ADDRESS"; // 需要替换为实际的签到合约地址
+const TOKEN_PATH = [
+    "0xfbecae21c91446f9c7b87e4e5869926998f99ffe",
+    "0xcf259bca0315c6d32e877793b6a10e97e7647fde"
+];
+
+// 合约 ABI
+const ROUTER_ABI = [
+    "function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable",
+    "function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)"
+];
+
+const CHECKIN_ABI = [
+    "function checkIn() external"
+];
 
 // 颜色输出函数
 const colorize = {
@@ -49,9 +51,10 @@ const logger = {
     tx: (message) => console.log(colorize.cyan(message)),
 };
 
-// 工具函数
+// 睡眠函数
 const sleep = (minutes) => new Promise(resolve => setTimeout(resolve, minutes * 60 * 1000));
 
+// 倒计时显示
 async function countdown(minutes) {
     const totalSeconds = minutes * 60;
     for (let i = totalSeconds; i > 0; i--) {
@@ -65,7 +68,7 @@ async function countdown(minutes) {
     console.log('\n');
 }
 
-// 文件读取函数
+// 读取钱包配置
 function getWallets() {
     try {
         const content = fs.readFileSync('token.txt', 'utf-8');
@@ -91,6 +94,7 @@ function getWallets() {
     }
 }
 
+// 读取代理配置
 function getProxies() {
     try {
         const proxies = fs.readFileSync('proxy.txt', 'utf-8')
@@ -105,7 +109,20 @@ function getProxies() {
     }
 }
 
-// Provider创建函数
+// 添加重试函数
+async function withRetry(fn, maxAttempts = 3, delaySeconds = 5) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            if (attempt === maxAttempts) throw error;
+            logger.warning(`尝试第 ${attempt} 次失败，${delaySeconds} 秒后重试...`);
+            await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
+        }
+    }
+}
+
+// 创建Provider
 function createProvider(proxy) {
     const providerUrl = "https://rpc-testnet.inichain.com";
     let agent;
@@ -142,19 +159,6 @@ function createProvider(proxy) {
     return provider;
 }
 
-// 重试函数
-async function withRetry(fn, maxAttempts = CONFIG.MAX_RETRIES, delaySeconds = CONFIG.RETRY_DELAY) {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-            return await fn();
-        } catch (error) {
-            if (attempt === maxAttempts) throw error;
-            logger.warning(`尝试第 ${attempt} 次失败，${delaySeconds} 秒后重试...`);
-            await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
-        }
-    }
-}
-
 // 签到功能
 async function performDailyCheckin(wallet, proxy, index) {
     return await withRetry(async () => {
@@ -165,16 +169,11 @@ async function performDailyCheckin(wallet, proxy, index) {
 
             logger.info(`钱包 ${index + 1}: 开始每日签到`);
 
-            const feeData = await provider.getFeeData();
-            const gasPrice = feeData.gasPrice;
-
-            const txParams = {
+            const tx = await contract.checkIn({
                 gasLimit: CONFIG.GAS_LIMIT
-            };
-
-            const tx = await contract.checkIn(txParams);
-            logger.tx(`钱包 ${index + 1} 签到交易哈希: ${tx.hash}`);
+            });
             
+            logger.tx(`钱包 ${index + 1} 签到交易哈希: ${tx.hash}`);
             const receipt = await tx.wait();
             logger.success(`钱包 ${index + 1} 签到成功 (Gas Used: ${receipt.gasUsed})`);
 
@@ -186,7 +185,7 @@ async function performDailyCheckin(wallet, proxy, index) {
     });
 }
 
-// 交易功能
+// 处理单个钱包的交易
 async function processSingleWallet(wallet, proxy, index) {
     return await withRetry(async () => {
         try {
@@ -238,12 +237,12 @@ async function processSingleWallet(wallet, proxy, index) {
     });
 }
 
-// 调度函数
+// 签到调度函数
 function scheduleCheckin(wallets, proxies) {
     const scheduleNextCheckin = () => {
         const now = new Date();
         const nextCheckin = new Date();
-        nextCheckin.setHours(10, 0, 0, 0);
+        nextCheckin.setHours(CONFIG.CHECKIN_TIME, 0, 0, 0);
         
         if (now >= nextCheckin) {
             nextCheckin.setDate(nextCheckin.getDate() + 1);
@@ -284,7 +283,7 @@ async function main() {
         process.exit(1);
     }
 
-    // 启动签到调度
+    // 启动签到调度器
     scheduleCheckin(wallets, proxies);
 
     // 开始循环交易
@@ -320,7 +319,7 @@ async function main() {
     }
 }
 
-// 启动程序
+// 执行主函数
 main().catch(error => {
     logger.error(`程序出错: ${error.message}`);
 });
